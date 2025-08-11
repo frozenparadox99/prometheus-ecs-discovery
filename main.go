@@ -27,13 +27,14 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
-	"github.com/go-yaml/yaml"
+	"gopkg.in/yaml.v2"
 )
 
 type labels struct {
@@ -604,7 +605,14 @@ func GetAugmentedTasks(svc *ecs.Client, svcec2 *ec2.Client, clusterArns []*strin
 func main() {
 	flag.Parse()
 
-	config, err := config.LoadDefaultConfig(context.Background())
+	// Configure IMDSv2 for enhanced security
+	// By default, the AWS SDK v2 uses IMDSv2 with fallback to IMDSv1
+	// The newer versions handle this automatically with secure defaults
+	cfg, err := config.LoadDefaultConfig(context.Background(),
+		config.WithEC2IMDSClientEnableState(imds.ClientEnabled),
+		// Use IPv4 endpoint mode for IMDS
+		config.WithEC2IMDSEndpointMode(imds.EndpointModeStateIPv4),
+	)
 	if err != nil {
 		logError(err)
 		return
@@ -612,13 +620,13 @@ func main() {
 
 	if *roleArn != "" {
 		// Assume role
-		stsSvc := sts.NewFromConfig(config)
-		config.Credentials = stscreds.NewAssumeRoleProvider(stsSvc, *roleArn)
+		stsSvc := sts.NewFromConfig(cfg)
+		cfg.Credentials = stscreds.NewAssumeRoleProvider(stsSvc, *roleArn)
 	}
 
 	// Initialise AWS Service clients
-	svc := ecs.NewFromConfig(config)
-	svcec2 := ec2.NewFromConfig(config)
+	svc := ecs.NewFromConfig(cfg)
+	svcec2 := ec2.NewFromConfig(cfg)
 
 	work := func() {
 		var clusters *ecs.ListClustersOutput
